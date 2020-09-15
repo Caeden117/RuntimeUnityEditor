@@ -22,6 +22,7 @@ using System.Runtime.InteropServices;
 
 [assembly: InternalsVisibleTo("RuntimeUnityEditor.Bepin4")]
 [assembly: InternalsVisibleTo("RuntimeUnityEditor.Bepin5")]
+[assembly: InternalsVisibleTo("RuntimeUnityEditor.BSIPA4")]
 
 // Version information for an assembly consists of the following four values:
 //

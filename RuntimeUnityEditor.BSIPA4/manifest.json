@@ -1,0 +1,13 @@
+﻿{
+  "$schema": "https://raw.githubusercontent.com/beat-saber-modding-group/BSIPA-MetadataFileSchema/master/Schema.json",
+  "id": "RuntimeUnityEditor.BSIPA4",
+  "name": "Runtime Unity Editor (BSIPA)",
+  "author": "Caeden117",
+  "version": "1.0.0",
+  "description": "BSIPA 4 compatibility plugin for the Runtime Unity Editor.",
+  "gameVersion": "1.11.1",
+  "dependsOn": {
+    "BSIPA": "^4.0.0",
+    "RuntimeUnityEditor.Core": "^2.1.1"
+  }
+}
