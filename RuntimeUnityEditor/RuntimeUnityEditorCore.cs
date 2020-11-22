@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.IO;
+using System.Reflection;
 using RuntimeUnityEditor.Core.Gizmos;
 using RuntimeUnityEditor.Core.ObjectTree;
 using RuntimeUnityEditor.Core.REPL;
@@ -12,7 +13,7 @@ namespace RuntimeUnityEditor.Core
 {
     public class RuntimeUnityEditorCore
     {
-        public const string Version = "2.1.1";
+        public const string Version = "2.2.1";
         public const string GUID = "RuntimeUnityEditor";
 
         public Inspector.Inspector Inspector { get; }
@@ -47,6 +48,19 @@ namespace RuntimeUnityEditor.Core
             }
         }
 
+        public bool EnableMouseInspect
+        {
+            get => MouseInspect.Enable;
+            set
+            {
+                if (MouseInspect.Enable != value)
+                {
+                    MouseInspect.Enable = value;
+                    SettingsChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+
         public bool ShowInspector
         {
             get => Inspector != null && Inspector.Show;
@@ -60,15 +74,21 @@ namespace RuntimeUnityEditor.Core
             }
         }
 
-        internal static RuntimeUnityEditorCore Instance { get; private set; }
+        public static RuntimeUnityEditorCore Instance { get; private set; }
         internal static MonoBehaviour PluginObject { get; private set; }
         internal static ILoggerWrapper Logger { get; private set; }
 
         private readonly GizmoDrawer _gizmoDrawer;
         private readonly GameObjectSearcher _gameObjectSearcher = new GameObjectSearcher();
 
-        private CursorLockMode _previousCursorLockState;
+        private bool _obsoleteCursor;
+        
+        private PropertyInfo _curLockState;
+        private PropertyInfo _curVisible;
+        
+        private int _previousCursorLockState;
         private bool _previousCursorVisible;
+        
         private KeyCode _showHotkey = KeyCode.F12;
 
         internal RuntimeUnityEditorCore(MonoBehaviour pluginObject, ILoggerWrapper logger, string configPath)
@@ -80,6 +100,20 @@ namespace RuntimeUnityEditor.Core
             Logger = logger;
             Instance = this;
 
+            // Reflection for compatibility with Unity 4.x
+            var tCursor = typeof(Cursor);
+            
+            _curLockState = tCursor.GetProperty("lockState", BindingFlags.Static | BindingFlags.Public);
+            _curVisible = tCursor.GetProperty("visible", BindingFlags.Static | BindingFlags.Public);
+
+            if (_curLockState == null && _curVisible == null)
+            {
+                _obsoleteCursor = true;
+                
+                _curLockState = typeof(Screen).GetProperty("lockCursor", BindingFlags.Static | BindingFlags.Public);
+                _curVisible = typeof(Screen).GetProperty("showCursor", BindingFlags.Static | BindingFlags.Public);
+            }
+            
             Inspector = new Inspector.Inspector(targetTransform => TreeViewer.SelectAndShowObject(targetTransform));
 
             TreeViewer = new ObjectTreeViewer(pluginObject, _gameObjectSearcher);
@@ -134,12 +168,18 @@ namespace RuntimeUnityEditor.Core
                 var originalSkin = GUI.skin;
                 GUI.skin = InterfaceMaker.CustomSkin;
 
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-
+                if (_obsoleteCursor)
+                    _curLockState.SetValue(null, false, null);
+                else
+                    _curLockState.SetValue(null, 0, null);
+                
+                _curVisible.SetValue(null, true, null);
+                
                 Inspector.DisplayInspector();
                 TreeViewer.DisplayViewer();
                 Repl?.DisplayWindow();
+                
+                MouseInspect.OnGUI();
 
                 // Restore old skin for maximum compatibility
                 GUI.skin = originalSkin;
@@ -155,15 +195,19 @@ namespace RuntimeUnityEditor.Core
                 {
                     if (value)
                     {
-                        _previousCursorLockState = Cursor.lockState;
-                        _previousCursorVisible = Cursor.visible;
+                        _previousCursorLockState = _obsoleteCursor ? Convert.ToInt32((bool)_curLockState.GetValue(null, null)) : (int)_curLockState.GetValue(null, null);
+                        _previousCursorVisible = (bool)_curVisible.GetValue(null, null);
                     }
                     else
                     {
-                        if (!_previousCursorVisible || _previousCursorLockState != CursorLockMode.None)
+                        if (!_previousCursorVisible || _previousCursorLockState != 0)
                         {
-                            Cursor.lockState = _previousCursorLockState;
-                            Cursor.visible = _previousCursorVisible;
+                            if(_obsoleteCursor)
+                                _curLockState.SetValue(null, Convert.ToBoolean(_previousCursorLockState), null);
+                            else
+                                _curLockState.SetValue(null, _previousCursorLockState, null);
+                
+                            _curVisible.SetValue(null, _previousCursorVisible, null);
                         }
                     }
                 }
@@ -194,8 +238,16 @@ namespace RuntimeUnityEditor.Core
             {
                 RefreshGameObjectSearcher(false);
 
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
+                if (_obsoleteCursor)
+                    _curLockState.SetValue(null, false, null);
+                else
+                    _curLockState.SetValue(null, 0, null);
+                
+                _curVisible.SetValue(null, true, null);
+
+                TreeViewer.Update();
+
+                MouseInspect.Update();
             }
         }
 
@@ -203,8 +255,12 @@ namespace RuntimeUnityEditor.Core
         {
             if (Show)
             {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
+                if (_obsoleteCursor)
+                    _curLockState.SetValue(null, false, null);
+                else
+                    _curLockState.SetValue(null, 0, null);
+                
+                _curVisible.SetValue(null, true, null);
             }
         }
 

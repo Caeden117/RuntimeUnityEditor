@@ -73,6 +73,7 @@ namespace RuntimeUnityEditor.Core.ObjectTree
         private bool _wireframe;
         private bool _actuallyInsideOnGui;
 
+        private readonly WaitForEndOfFrame _waitForEndOfFrame = new WaitForEndOfFrame();
         private IEnumerator SetWireframeCo()
         {
             while (true)
@@ -81,7 +82,7 @@ namespace RuntimeUnityEditor.Core.ObjectTree
 
                 _actuallyInsideOnGui = true;
 
-                yield return new WaitForEndOfFrame();
+                yield return _waitForEndOfFrame;
 
                 if (GL.wireframe != _wireframe)
                     GL.wireframe = _wireframe;
@@ -148,7 +149,7 @@ namespace RuntimeUnityEditor.Core.ObjectTree
                 {
                     GUI.color = Color.cyan;
                     if (_scrollTreeToSelected && Event.current.type == EventType.Repaint)
-                        _scrollTarget = (int)(GUILayoutUtility.GetLastRect().y - 50);
+                        _scrollTarget = (int)(GUILayoutUtility.GetLastRect().y - 250);
                 }
                 else if (!go.activeSelf)
                 {
@@ -257,7 +258,7 @@ namespace RuntimeUnityEditor.Core.ObjectTree
                 {
                     if (SelectedTransform == null) GUI.enabled = false;
                     if (GUILayout.Button("Dump", GUILayout.ExpandWidth(false)))
-                        SceneDumper.DumpObjects(SelectedTransform?.gameObject);
+                        SceneDumper.DumpObjects(SelectedTransform.gameObject);
                     GUI.enabled = true;
 
                     if (GUILayout.Button("Log", GUILayout.ExpandWidth(false)))
@@ -277,8 +278,10 @@ namespace RuntimeUnityEditor.Core.ObjectTree
             GUILayout.BeginHorizontal();
             {
                 GUI.changed = false;
-                var n = GUILayout.Toggle(Application.runInBackground, "Run in background");
+                var n = GUILayout.Toggle(Application.runInBackground, "Run in bg");
                 if (GUI.changed) Application.runInBackground = n;
+
+                RuntimeUnityEditorCore.Instance.EnableMouseInspect = GUILayout.Toggle(RuntimeUnityEditorCore.Instance.EnableMouseInspect, "Mouse inspect");
 
                 AssetBundleManagerHelper.DrawButtonIfAvailable();
             }
@@ -335,21 +338,22 @@ namespace RuntimeUnityEditor.Core.ObjectTree
 
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Label($"Layer {SelectedTransform.gameObject.layer} ({LayerMask.LayerToName(SelectedTransform.gameObject.layer)})");
+                    var selectedGameObject = SelectedTransform.gameObject;
+                    GUILayout.Label($"Layer {selectedGameObject.layer} ({LayerMask.LayerToName(selectedGameObject.layer)})");
 
                     GUILayout.Space(8);
 
-                    GUILayout.Toggle(SelectedTransform.gameObject.isStatic, "isStatic");
+                    GUILayout.Toggle(selectedGameObject.isStatic, "isStatic");
 
-                    SelectedTransform.gameObject.SetActive(GUILayout.Toggle(SelectedTransform.gameObject.activeSelf, "Active", GUILayout.ExpandWidth(false)));
+                    selectedGameObject.SetActive(GUILayout.Toggle(selectedGameObject.activeSelf, "Active", GUILayout.ExpandWidth(false)));
 
                     GUILayout.FlexibleSpace();
 
                     if (GUILayout.Button("Inspect"))
-                        OnInspectorOpen(new InstanceStackEntry(SelectedTransform.gameObject, SelectedTransform.gameObject.name));
+                        OnInspectorOpen(new InstanceStackEntry(selectedGameObject, selectedGameObject.name));
 
                     if (GUILayout.Button("X"))
-                        Object.Destroy(SelectedTransform.gameObject);
+                        Object.Destroy(selectedGameObject);
                 }
                 GUILayout.EndHorizontal();
 
@@ -411,27 +415,29 @@ namespace RuntimeUnityEditor.Core.ObjectTree
 
                 if (GUILayout.Button(component.GetType().Name, GUI.skin.label))
                 {
-                    OnInspectorOpen(new InstanceStackEntry(component.transform, component.transform.name),
+                    var transform = component.transform;
+                    OnInspectorOpen(new InstanceStackEntry(transform, transform.name),
                         new InstanceStackEntry(component, component.GetType().FullName));
                 }
 
                 switch (component)
                 {
                     case Image img:
-                        if (img.sprite != null && img.sprite.texture != null)
+                        var imgSprite = img.sprite;
+                        if (imgSprite != null && imgSprite.texture != null)
                         {
-                            GUILayout.Label(img.sprite.name);
+                            GUILayout.Label(imgSprite.name);
 
                             if (!_imagePreviewCache.TryGetValue(img, out var tex))
                             {
                                 try
                                 {
-                                    var newImg = img.sprite.texture.GetPixels(
-                                        (int)img.sprite.textureRect.x, (int)img.sprite.textureRect.y,
-                                        (int)img.sprite.textureRect.width,
-                                        (int)img.sprite.textureRect.height);
-                                    tex = new Texture2D((int)img.sprite.textureRect.width,
-                                        (int)img.sprite.textureRect.height);
+                                    var newImg = imgSprite.texture.GetPixels(
+                                        (int)imgSprite.textureRect.x, (int)imgSprite.textureRect.y,
+                                        (int)imgSprite.textureRect.width,
+                                        (int)imgSprite.textureRect.height);
+                                    tex = new Texture2D((int)imgSprite.textureRect.width,
+                                        (int)imgSprite.textureRect.height);
                                     tex.SetPixels(newImg);
                                     //todo tex.Resize(0, 0); get proper width
                                     tex.Apply();
@@ -465,9 +471,8 @@ namespace RuntimeUnityEditor.Core.ObjectTree
                         GUILayout.Label(r.mainTexture);
                         break;
                     case Renderer re:
-                        GUILayout.Label(re.material != null
-                            ? re.material.shader.name
-                            : "[No material]");
+                        var reMaterial = re.material;
+                        GUILayout.Label(reMaterial != null ? reMaterial.shader.name : "[No material]");
                         break;
                     case Button b:
                         {
@@ -547,13 +552,6 @@ namespace RuntimeUnityEditor.Core.ObjectTree
                     var currentCount = 0;
                     foreach (var rootGameObject in _gameObjectSearcher.GetSearchedOrAllObjects())
                         DisplayObjectTreeHelper(rootGameObject, 0, ref currentCount);
-
-                    if (_scrollTreeToSelected && _scrollTarget > 0 && Event.current.type == EventType.layout)
-                    {
-                        _scrollTreeToSelected = false;
-                        _treeScrollPosition.y = _scrollTarget;
-                        _scrollTarget = 0;
-                    }
                 }
                 GUILayout.EndScrollView();
             }
@@ -614,6 +612,16 @@ namespace RuntimeUnityEditor.Core.ObjectTree
                 }
             }
             GUILayout.EndHorizontal();
+        }
+
+        public void Update()
+        {
+            if (_scrollTreeToSelected && _scrollTarget > 0)
+            {
+                _scrollTreeToSelected = false;
+                _treeScrollPosition.y = _scrollTarget;
+                _scrollTarget = 0;
+            }
         }
     }
 }
